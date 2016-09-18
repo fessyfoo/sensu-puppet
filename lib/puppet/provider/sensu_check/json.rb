@@ -18,7 +18,41 @@ Puppet::Type.type(:sensu_check).provide(:json) do
     end
   end
 
+  def prop_names(properties)
+    properties \
+      .map(&:name) \
+      .map(&:to_s) \
+      .reject { |p| p == 'ensure' }
+  end
+
+  # properties the resource declaration defined (or defaults)
+  def resource_properties
+    prop_names resource.properties
+  end
+
+  def should_prop?(prop)
+    resource_properties.include? prop
+  end
+
+  # properties the type defined
+  def type_properties
+    prop_names resource.class.properties
+  end
+
+  def is_property?(prop)
+    type_properties.include? prop
+  end
+
+  def prune_conf
+    # remove any properties undefined in the resource declaration
+    # being careful not to remove any custom attributes.
+    conf['checks'][resource[:name]].delete_if do |k,_|
+      is_property?(k) && !should_prop?(k)
+    end
+  end
+
   def flush
+    prune_conf # remove any undefined properties
     File.open(config_file, 'w') do |f|
       f.puts JSON.pretty_generate(conf)
     end
@@ -29,16 +63,12 @@ Puppet::Type.type(:sensu_check).provide(:json) do
     conf['checks'][resource[:name]] = {}
   end
 
-  def check_args
-    ['handlers','command','interval','occurrences','refresh','source','subscribers','type','standalone','high_flap_threshold','low_flap_threshold','timeout','aggregate','handle','publish','dependencies','custom','ttl', 'subdue']
-  end
-
   def custom
-    conf['checks'][resource[:name]].reject { |k,v| check_args.include?(k) }
+    conf['checks'][resource[:name]].reject { |k,v| is_property? k }
   end
 
   def custom=(value)
-    conf['checks'][resource[:name]].delete_if { |k,v| not check_args.include?(k) }
+    conf['checks'][resource[:name]].delete_if { |k,v| !is_property? k }
     conf['checks'][resource[:name]].merge!(to_type(value))
   end
 
